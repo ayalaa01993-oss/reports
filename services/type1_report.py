@@ -1,65 +1,61 @@
 import random
 from calendar import monthrange
 from datetime import date, time
-
 from reportlab.pdfgen.canvas import Canvas
-
 from models.type1_model import OFF_WEEKDAYS, Type1Data, Type1Row
 from services.base_report import BaseReport, heb
-from services.time_utils import CleanRow
+from services.hours_generator import HoursModel
+from services.time_parser import CleanRow
 
 HEBREW_DAYS = {6: "ראשון", 0: "שני", 1: "שלישי", 2: "רביעי", 3: "חמישי", 4: "שישי", 5: "שבת"}
 MONTH_ABBR = ["ינו", "פבר", "מרץ", "אפר", "מאי", "יונ", "יול", "אוג", "ספט", "אוק", "נוב", "דצמ"]
 RIGHT = 565
 
-
 def _m(t: time) -> int:
     return t.hour * 60 + t.minute
 
 
+def _t(minutes: int) -> time:
+    return time(minutes // 60, minutes % 60)
+
+
 class Type1Report(BaseReport):
-    """Type1 report: summary at the top of the page, and a table of every day of the month."""
-
     def __init__(self, worker: str = "עובד לדוגמה", hourly_rate: float = 30.0):
-        self.worker = worker                 # intentionally fake name
-        self.hourly_rate = hourly_rate       # also fake
-        self._entries: list[int] = []
-        self._lengths: list[int] = []
+        self.worker = worker
+        self.hourly_rate = hourly_rate
+        self._model: HoursModel | None = None
+        self._year = self._month = 0
+        self._work_days: set[int] = set()
 
-    # ---------- Learning from an existing report ----------
-    def learn(self, rows: list[CleanRow]) -> None:
+    def learn(self, rows: list[CleanRow], year: int, month: int) -> None:
+        """year/month are those of the SOURCE report. Row i is day i of the month."""
+        days_in_month = monthrange(year, month)[1]
+        if len(rows) != days_in_month:
+            raise ValueError(f"Expected {days_in_month} table rows for {month}/{year}, got {len(rows)}")
         good = [r for r in rows if r.entry and r.exit and not r.suspicious]
         if not good:
-            raise ValueError("אין שורות תקינות ללמוד מהן")
-        self._entries = [_m(r.entry) for r in good]
-        self._lengths = [_m(r.exit) - _m(r.entry) for r in good]
+            raise ValueError("No valid rows to learn from")
+        self._year, self._month = year, month
+        self._work_days = {i for i, r in enumerate(rows, start=1) if not r.is_empty}
+        self._model = HoursModel()
+        self._model.fit([_m(r.entry) for r in good],
+                        [_m(r.exit) - _m(r.entry) for r in good])
 
-    # ---------- Generation ----------
-    def generate(self, year: int, month: int, seed: int | None = None,
-                 absence_chance: float = 0.0) -> Type1Data:
-        if not self._entries:
-            raise RuntimeError("קודם צריך לקרוא learn")
+    def generate(self, seed: int | None = None) -> Type1Data:
+        if self._model is None:
+            raise RuntimeError("Call learn() first")
         rng = random.Random(seed)
-        lo_e, hi_e = min(self._entries), max(self._entries)
-        lo_l, hi_l = min(self._lengths), max(self._lengths)
-
         rows = []
-        for d in range(1, monthrange(year, month)[1] + 1):
-            day = date(year, month, d)
-            if day.weekday() in OFF_WEEKDAYS or rng.random() < absence_chance:
+        for d in range(1, monthrange(self._year, self._month)[1] + 1):
+            day = date(self._year, self._month, d)
+            if d not in self._work_days:      # same days off as the source
                 rows.append(Type1Row(day=day))
                 continue
-            entry = min(max(rng.choice(self._entries) + rng.randint(-3, 3), lo_e), hi_e)
-            length = min(max(rng.choice(self._lengths) + rng.randint(-4, 4), lo_l), hi_l)
-            rows.append(Type1Row(
-                day=day,
-                entry=time(entry // 60, entry % 60),
-                exit=time((entry + length) // 60, (entry + length) % 60),
-                total=round(length / 60, 2),
-            ))
-        return Type1Data(title=self.worker, year=year, month=month,
+            entry, length = self._model.sample(rng)
+            rows.append(Type1Row(day=day, entry=_t(entry), exit=_t(entry + length),
+                                 total=round(length / 60, 2)))
+        return Type1Data(title=self.worker, year=self._year, month=self._month,
                          hourly_rate=self.hourly_rate, rows=rows)
-
     # ---------- Validation ----------
     def validate(self, data: Type1Data) -> list[str]:
         errors = []

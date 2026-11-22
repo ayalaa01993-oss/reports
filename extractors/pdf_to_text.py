@@ -4,13 +4,10 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pymupdf as fitz  # PyMuPDF
-import pytesseract
 from PIL import Image, ImageOps
 
 import config
-
-if Path(config.TESSERACT_CMD).exists():
-    pytesseract.pytesseract.tesseract_cmd = config.TESSERACT_CMD
+from extractors.ocr_engine import image_to_string
 
 
 def _remove_lines(gray: np.ndarray) -> np.ndarray:
@@ -67,7 +64,7 @@ def pdf_to_text(
                 img.save(config.DEBUG_DIR / f"{Path(pdf_path).stem}_p{page_num}.png")
 
             pages_text.append(
-                pytesseract.image_to_string(img, lang=lang, config=config_str)
+                image_to_string(img, lang=lang, config=config_str)
             )
     return "\n\n".join(pages_text)
 

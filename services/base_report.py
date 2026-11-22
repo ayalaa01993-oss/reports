@@ -1,19 +1,15 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
-
 from bidi.algorithm import get_display
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen.canvas import Canvas
-
+import config
 from models.base_model import BaseData
 
-FONT_CANDIDATES = [
-    r"C:\Windows\Fonts\arial.ttf",                          # Windows
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",      # Linux
-]
-FONT_NAME = "ReportFont"
+FONT_CANDIDATES = config.FONT_CANDIDATES
+FONT_NAME = config.FONT_NAME
 
 
 def heb(text: str) -> str:
@@ -51,10 +47,9 @@ class BaseReport(ABC):
         """List of errors. Empty = valid."""
 
     @abstractmethod
-    def generate(self, year: int, month: int, seed: int | None = None) -> BaseData:
+    def generate(self, seed: int | None = None) -> BaseData:
         """Generate test data."""
 
-    # ---------- What is shared ----------
     def build_pdf(self, data: BaseData, path: str | Path) -> Path:
         errors = self.validate(data)
         if errors:
@@ -96,4 +91,6 @@ class BaseReport(ABC):
             if Path(p).exists():
                 pdfmetrics.registerFont(TTFont(FONT_NAME, p))
                 return
-        raise FileNotFoundError("לא נמצא פונט עם תמיכה בעברית, הוסיפי נתיב ל-FONT_CANDIDATES")
+        raise FileNotFoundError(
+            "No Hebrew-capable font found; set REPORT_FONT_PATH to a font file"
+        )

@@ -12,9 +12,16 @@ DEBUG_DIR = DATA_DIR / "debug_images"  # intermediate images for debugging
 OUTPUT_DIR = DATA_DIR / "output"  # generated reports
 
 # ---- Tesseract ----
-TESSERACT_CMD = os.environ.get(
-    "TESSERACT_CMD", r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-)
+TESSERACT_CMD = os.environ.get("TESSERACT_CMD", "tesseract")
+
+# ---- Report fonts ----
+FONT_NAME = "ReportFont"
+FONT_CANDIDATES = []
+if os.environ.get("REPORT_FONT_PATH"):
+    FONT_CANDIDATES.append(Path(os.environ["REPORT_FONT_PATH"]))
+if os.environ.get("WINDIR"):
+    FONT_CANDIDATES.append(Path(os.environ["WINDIR"]) / "Fonts" / "arial.ttf")
+FONT_CANDIDATES.append(Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"))
 
 # ---- type1 extraction ----
 OCR_DPI = 300

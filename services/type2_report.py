@@ -1,15 +1,12 @@
 import random
-import re
-from calendar import monthrange
-from collections import Counter
 from datetime import date, time
 
 from reportlab.pdfgen.canvas import Canvas
 
 from models.type2_model import Type2Data, Type2Row
 from services.base_report import BaseReport, heb
-
-TIME_RE = re.compile(r"(?<!\d)(\d{1,2}):(\d{2})(?!\d)")
+from services.hours_generator import HoursModel
+from services.report_parser import BIDI_MARKS, MissingDatesError, TIME_RE, find_date
 HEBREW_DAYS = {6: "יום ראשון", 0: "יום שני", 1: "יום שלישי", 2: "יום רביעי",
                3: "יום חמישי", 4: "יום שישי", 5: "שבת"}
 RIGHT = 565
@@ -30,16 +27,20 @@ class Type2Report(BaseReport):
     row_height = 17
 
     def __init__(self, company: str = "חברה לדוגמה", place: str = "מקום לדוגמה"):
-        self.company = company        # intentionally fake name
+        self.company = company
         self.place = place
-        self._entries: list[int] = []
-        self._lengths: list[int] = []
-        self._break = 30
+        self._model: HoursModel | None = None
+        self._days: list[date] = []
+        self._breaks: list[int] = []
 
     # ---------- Learning from OCR text ----------
-    def parse_text(self, text: str) -> None:
-        entries, lengths, breaks = [], [], []
+    def parse_text(self, text: str, dates: list[date] | None = None) -> None:
+        """Learn hours from the text. Dates come from the text itself, or from `dates`
+        when they were read separately (scanned reports).
+        Raises MissingDatesError if there are valid time rows but no dates at all."""
+        days, entries, lengths, breaks = [], [], [], []
         for line in text.splitlines():
+            line = BIDI_MARKS.sub("", line)
             times = TIME_RE.findall(line)
             if len(times) < 3:
                 continue
@@ -51,31 +52,37 @@ class Type2Report(BaseReport):
             brk = int(times[2][0]) * 60 + int(times[2][1])
             if exit_ <= entry or brk >= exit_ - entry:
                 continue
+            day = find_date(line)
+            if day is not None:
+                days.append(day)
             entries.append(entry)
             lengths.append(exit_ - entry)
             breaks.append(brk)
         if not entries:
-            raise ValueError("לא נמצאו שורות נוכחות תקינות בטקסט")
-        self._entries, self._lengths = entries, lengths
-        self._break = Counter(breaks).most_common(1)[0][0]
+            raise ValueError("No valid attendance rows found in text")
+        if dates:
+            days = list(dates)          # dates read separately from the scan
+        if not days:
+            raise MissingDatesError("Time rows found but no dates; pass dates=read_type2_dates(pdf)")
+        self._days = sorted(set(days))
+        self._breaks = breaks
+        self._model = HoursModel()
+        self._model.fit(entries, lengths)
 
     # ---------- Generation ----------
-    def generate(self, year: int, month: int, seed: int | None = None) -> Type2Data:
-        if not self._entries:
-            raise RuntimeError("קודם צריך לקרוא parse_text")
+    def generate(self, seed: int | None = None) -> Type2Data:
+        if self._model is None:
+            raise RuntimeError("Call parse_text() first")
         rng = random.Random(seed)
         rows = []
-        for d in range(1, monthrange(year, month)[1] + 1):
-            day = date(year, month, d)
+        for day in self._days:                # same dates as the source
+            brk = rng.choice(self._breaks)
+            entry, length = self._model.sample(rng, min_length=brk + 30)
+            net = round((length - brk) / 60, 2)
             is_shabbat = day.weekday() == 5
-            if rng.random() > (0.3 if is_shabbat else 0.75):
-                continue
-            entry = rng.choice(self._entries) + rng.choice([-10, -5, 0, 5, 10])
-            length = rng.choice(self._lengths) + rng.choice([-15, 0, 0, 15])
-            net = round((length - self._break) / 60, 2)
             rows.append(Type2Row(
                 day=day, place=self.place, entry=_t(entry), exit=_t(entry + length),
-                break_minutes=self._break, total=net,
+                break_minutes=brk, total=net,
                 h100=0.0 if is_shabbat else net,
                 shabbat=net if is_shabbat else 0.0,
             ))

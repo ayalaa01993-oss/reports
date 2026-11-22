@@ -1,13 +1,8 @@
-from pathlib import Path
-
 import cv2
 import numpy as np
-import pytesseract
 
 import config
-
-if Path(config.TESSERACT_CMD).exists():
-    pytesseract.pytesseract.tesseract_cmd = config.TESSERACT_CMD
+from extractors.ocr_engine import image_to_string
 
 _WHITELIST = "0123456789:./"
 
@@ -24,4 +19,4 @@ def read_cell(cell: np.ndarray) -> str:
     cell = cv2.resize(cell, None, fx=config.CELL_SCALE, fy=config.CELL_SCALE,
                       interpolation=cv2.INTER_AREA)
     cfg = f"--psm 7 -c tessedit_char_whitelist={_WHITELIST}"
-    return pytesseract.image_to_string(cell, lang="eng", config=cfg).strip()
+    return image_to_string(cell, lang="eng", config=cfg).strip()

@@ -1,0 +1,8 @@
+opencv-python
+numpy
+pymupdf
+pytesseract
+pillow
+reportlab
+python-bidi
+pytest
